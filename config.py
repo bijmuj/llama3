@@ -1,0 +1,53 @@
+from dataclasses import dataclass
+
+
+@dataclass
+class ModelConfig:
+    layers: int = 24
+    embedding_dim: int = 4096
+    query_heads: int = 32
+    key_value_heads: int = 8
+    context_window: int = 8192
+    norm_eps: float = 1e-5
+    hidden_dim: int = (
+        11008  # 4 * embedding_dim * 2 / 3 = 10922.67 -> 11008 (incremented to next closest multiple of 256)
+    )
+    rope_base: int = 50000
+    vocab_size: int = 128000
+
+
+MODEL_3B = ModelConfig()
+MODEL_7B = ModelConfig(layers=32, hidden_dim=14336)
+
+
+@dataclass
+class DatasetConfig:
+    name: str = ""
+    subset: str = ""
+    split: str = ""
+    tokenizer_path: str = ""
+
+
+DATASET_C4 = DatasetConfig(
+    name="allenai/c4",
+    subset="en",
+    split="train",
+    tokenizer_path="checkpoints/llamav3-c4-128k",
+)
+
+
+@dataclass
+class TrainerConfig:
+    batch_size: int = 8
+    num_workers: int = 6
+    n_iter: int = 1e7
+    learning_rate: float = 3e-4
+    min_learning_rate: float = 3e-5
+    warmup_iters: int = 2000
+    ckpt_path: str = ""
+    save_every: int = 100
+    keep_last: int = 3
+    device: str = "cuda"
+
+
+TRAINER_BASE = TrainerConfig(ckpt_path="checkpoints/llamav3-c4-3b")
