@@ -16,8 +16,11 @@ class ModelConfig:
     vocab_size: int = 128000
 
 
-MODEL_1B = ModelConfig(
-    layers=16, embedding_dim=2048, hidden_dim=8192, block_size=2048
+MODEL_300M = ModelConfig(
+    layers=16,
+    embedding_dim=768,
+    hidden_dim=2048,
+    block_size=2048,
 )
 MODEL_3B = ModelConfig()
 MODEL_7B = ModelConfig(layers=32, hidden_dim=14336)
@@ -35,22 +38,19 @@ DATASET_C4 = DatasetConfig(
     name="allenai/c4",
     subset="en",
     split="train",
-    tokenizer_path="checkpoints/llamav3-c4-128k",
+    tokenizer_path="./tokenizers/c4-128k",
 )
 
 
 @dataclass
 class TrainerConfig:
-    batch_size: int = 8
+    batch_size: int = 1
     num_workers: int = 6
-    n_iter: int = 1e7
+    n_iter: int = 2_000_000
     learning_rate: float = 3e-4
     min_lr_ratio: float = 0.1
     warmup_iters: int = 2000
     ckpt_path: str = ""
-    save_every: int = 100
+    save_every: int = 1000
     keep_last: int = 3
     device: str = "cuda"
-
-
-TRAINER_BASE = TrainerConfig(ckpt_path="checkpoints/llamav3-c4-3b")
