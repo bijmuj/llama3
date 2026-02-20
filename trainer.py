@@ -1,4 +1,5 @@
 import os
+from glob import glob
 
 import torch
 from torch.nn.functional import cross_entropy
@@ -32,7 +33,7 @@ class Trainer:
         self.start_iter = 0
 
         self.model = (
-            Transformer(model_config).to(self.config.device).to(torch.float16)
+            Transformer(model_config).to(self.config.device).to(torch.bfloat16)
         )
 
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -50,13 +51,7 @@ class Trainer:
             self.base_dataset, self.tokenizer, self.model_config.block_size
         )
 
-        self.optimizer = AdamW(
-            self.model.parameters(),
-            lr=self.config.learning_rate,
-            betas=(0.9, 0.95),
-            eps=1e-5,
-            weight_decay=0.1,
-        )
+        self.optimizer = self.configure_optimizer()
         self.lr_scheduler = ChainedScheduler(
             [
                 LinearLR(
@@ -74,7 +69,76 @@ class Trainer:
             ]
         )
 
-    def train(self):
+    def configure_optimizer(self):
+        decay = set()
+        no_decay = set()
+        whitelist_weight_modules = (torch.nn.Linear,)
+        blacklist_weight_modules = (torch.nn.RMSNorm, torch.nn.Embedding)
+
+        for mn, m in self.model.named_modules():
+            for pn, p in m.named_parameters():
+                fpn = "%s.%s" % (mn, pn) if mn else pn  # full param name
+                # random note: because named_modules and named_parameters are recursive
+                # we will see the same tensors p many many times. but doing it this way
+                # allows us to know which parent module any tensor p belongs to...
+                if pn.endswith("bias"):
+                    # all biases will not be decayed
+                    no_decay.add(fpn)
+                elif pn.endswith("weight") and isinstance(
+                    m, blacklist_weight_modules
+                ):
+                    # weights of blacklist modules will NOT be weight decayed
+                    no_decay.add(fpn)
+                elif pn.endswith("weight") and isinstance(
+                    m, whitelist_weight_modules
+                ):
+                    # weights of whitelist modules will be weight decayed
+                    decay.add(fpn)
+
+        # validate that we considered every parameter
+        param_dict = {pn: p for pn, p in self.model.named_parameters()}
+        inter_params = decay & no_decay
+        union_params = decay | no_decay
+        assert (
+            len(inter_params) == 0
+        ), "parameters %s made it into both decay/no_decay sets!" % (
+            str(inter_params),
+        )
+        assert len(param_dict.keys() - union_params) == 0, (
+            "parameters %s were not separated into either decay/no_decay set!"
+            % (str(param_dict.keys() - union_params),)
+        )
+
+        # create the pytorch optimizer object
+        optim_groups = [
+            {
+                "params": [param_dict[pn] for pn in sorted(list(decay))],
+                "weight_decay": 0.1,
+            },
+            {
+                "params": [param_dict[pn] for pn in sorted(list(no_decay))],
+                "weight_decay": 0.0,
+            },
+        ]
+        optimizer = AdamW(
+            optim_groups,
+            lr=self.config.learning_rate,
+            betas=(0.9, 0.95),
+            eps=1e-5,
+        )
+        return optimizer
+
+    def load_most_recent(self):
+        files = glob(f"{self.config.ckpt_path}/*.pt")
+        latest_file = max(files, key=os.path.getctime)
+        ckpt = torch.load(latest_file, weights_only=False)
+
+        self.start_iter = ckpt["start_iter"]
+        self.optimizer.load_state_dict(ckpt["optimizer"])
+        self.model.load_state_dict(ckpt["model"])
+        self.lr_scheduler.load_state_dict(ckpt["scheduler"])
+
+    def train(self, wandb_run=None):
         os.makedirs(self.config.ckpt_path, exist_ok=True)
         self.model.train()
 
@@ -102,12 +166,21 @@ class Trainer:
             self.optimizer.zero_grad()
 
             logits = self.model(x)
-
-            loss = cross_entropy(logits.view(-1, logits.size(-1)), y.view(-1))
+            loss = cross_entropy(
+                logits.float().view(-1, logits.size(-1)), y.view(-1)
+            )
             loss.backward()
+
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
 
             self.optimizer.step()
             self.lr_scheduler.step()
+
+            if torch.isnan(loss).any():
+                raise f"Encountered NaN on iter {n_iters+1}"
+
+            if wandb_run is not None:
+                wandb_run.log({"loss": loss.item()})
 
             if (n_iters + 1) % self.config.save_every == 0:
                 file_path = os.path.join(
@@ -121,7 +194,7 @@ class Trainer:
                         "dataset_config": self.dataset_config,
                         "model": self.model.state_dict(),
                         "optimizer": self.optimizer.state_dict(),
-                        "scheduler": self.lr_scheduler,
+                        "scheduler": self.lr_scheduler.state_dict(),
                         "start_iter": n_iters + 1,
                     },
                     file_path,
