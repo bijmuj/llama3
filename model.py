@@ -26,12 +26,12 @@ class RoPE(nn.Module):
         theta = 1 / (self.config.rope_base ** (j.float() / self.dim))
         # possible token positions in curr sequence
         m = torch.arange(
-            max(self.config.context_window * 2, x.shape[2]), device=x.device
+            max(self.config.block_size * 2, x.shape[2]), device=x.device
         )
         # precompute every combination of m and theta
-        # shape: [context_window * 2, attn_dim / 2]
+        # shape: [block_size * 2, attn_dim / 2]
         m_theta = torch.outer(m, theta)
-        # shape: [context_window * 2, attn_dim]
+        # shape: [block_size * 2, attn_dim]
         self.cos_cache = m_theta.cos().repeat(1, 2).to(x.dtype)
         self.sin_cache = m_theta.sin().repeat(1, 2).to(x.dtype)
 
@@ -75,7 +75,7 @@ class GQA(nn.Module):
             bias=False,
         )
         self.W_o = nn.Linear(
-            self.config.attn_dim * self.config.query_heads,
+            self.attn_dim * self.config.query_heads,
             self.config.embedding_dim,
             bias=False,
         )
@@ -169,7 +169,7 @@ class Transformer(nn.Module):
         )
         self.layers = nn.ModuleList()
         for _ in range(self.config.layers):
-            layers.append(self.config)
+            self.layers.append(Block(self.config))
         self.norm = nn.RMSNorm(self.config.embedding_dim, self.config.norm_eps)
         self.lm_head = nn.Linear(
             self.config.embedding_dim, self.config.vocab_size
