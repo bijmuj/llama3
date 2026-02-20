@@ -1,6 +1,8 @@
 __pycache__/
 .vevnv/
 .vscode/
+wandb/
+checkpoints/*/*.pt
 
 hf_tokens.py
 uv.lock
