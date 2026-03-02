@@ -53,4 +53,5 @@ class TrainerConfig:
     ckpt_path: str = ""
     save_every: int = 1000
     keep_last: int = 3
+    accum_steps: int = 1
     device: str = "cuda"

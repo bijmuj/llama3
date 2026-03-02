@@ -33,7 +33,7 @@ class Trainer:
         self.start_iter = 0
 
         self.model = (
-            Transformer(model_config).to(self.config.device).to(torch.bfloat16)
+            Transformer(model_config).to(self.config.device).to(torch.float16)
         )
 
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -130,13 +130,17 @@ class Trainer:
 
     def load_most_recent(self):
         files = glob(f"{self.config.ckpt_path}/*.pt")
-        latest_file = max(files, key=os.path.getctime)
-        ckpt = torch.load(latest_file, weights_only=False)
+        if len(files):
+            latest_file = max(files, key=os.path.getctime)
+            print(f"trying to load {latest_file}")
+            ckpt = torch.load(latest_file, weights_only=False)
 
-        self.start_iter = ckpt["start_iter"]
-        self.optimizer.load_state_dict(ckpt["optimizer"])
-        self.model.load_state_dict(ckpt["model"])
-        self.lr_scheduler.load_state_dict(ckpt["scheduler"])
+            self.start_iter = ckpt["start_iter"]
+            self.optimizer.load_state_dict(ckpt["optimizer"])
+            self.model.load_state_dict(ckpt["model"])
+            self.lr_scheduler.load_state_dict(ckpt["scheduler"])
+
+            print(f"loaded checkpoint: {latest_file}")
 
     def train(self, wandb_run=None):
         os.makedirs(self.config.ckpt_path, exist_ok=True)
@@ -150,7 +154,7 @@ class Trainer:
             pin_memory=True,
         )
         data_iter = iter(dataloader)
-        old_files = []
+        old_files = glob(f"{self.config.ckpt_path}/*.pt")
 
         for n_iters in tqdm(range(self.start_iter, self.config.n_iter)):
             try:
@@ -163,18 +167,10 @@ class Trainer:
             x = x[:, :-1].to(self.config.device)
             y = y[:, 1:].to(self.config.device)
 
-            self.optimizer.zero_grad()
-
             logits = self.model(x)
             loss = cross_entropy(
                 logits.float().view(-1, logits.size(-1)), y.view(-1)
             )
-            loss.backward()
-
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-
-            self.optimizer.step()
-            self.lr_scheduler.step()
 
             if torch.isnan(loss).any():
                 raise f"Encountered NaN on iter {n_iters+1}"
@@ -182,7 +178,17 @@ class Trainer:
             if wandb_run is not None:
                 wandb_run.log({"loss": loss.item()})
 
-            if (n_iters + 1) % self.config.save_every == 0:
+            loss = loss.float() / self.config.accum_steps
+            loss.backward()
+
+            if (n_iters + 1) % self.config.accum_steps == 0:
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+
+                self.optimizer.step()
+                self.lr_scheduler.step()
+                self.optimizer.zero_grad()
+
+            if (n_iters + 1) % (self.config.save_every * 10) == 0:
                 file_path = os.path.join(
                     self.config.ckpt_path, f"trainer-{n_iters+1}.pt"
                 )
