@@ -188,7 +188,7 @@ class Trainer:
                 self.lr_scheduler.step()
                 self.optimizer.zero_grad()
 
-            if (n_iters + 1) % (self.config.save_every * 10) == 0:
+            if (n_iters + 1) % (self.config.save_every) == 0:
                 file_path = os.path.join(
                     self.config.ckpt_path, f"trainer-{n_iters+1}.pt"
                 )
