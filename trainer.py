@@ -33,7 +33,7 @@ class Trainer:
         self.start_iter = 0
 
         self.model = (
-            Transformer(model_config).to(self.config.device).to(torch.float16)
+            Transformer(model_config).to(self.config.device).to(torch.bfloat16)
         )
 
         self.tokenizer = AutoTokenizer.from_pretrained(
