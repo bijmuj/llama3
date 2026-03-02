@@ -1,0 +1,4 @@
+name: "allenai/c4"
+subset: "en"
+split: "train"
+tokenizer_path: "./tokenizers/c4-128k"

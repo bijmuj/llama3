@@ -16,30 +16,12 @@ class ModelConfig:
     vocab_size: int = 128000
 
 
-MODEL_300M = ModelConfig(
-    layers=16,
-    embedding_dim=768,
-    hidden_dim=2048,
-    block_size=2048,
-)
-MODEL_3B = ModelConfig()
-MODEL_7B = ModelConfig(layers=32, hidden_dim=14336)
-
-
 @dataclass
 class DatasetConfig:
     name: str = ""
     subset: str = ""
     split: str = ""
     tokenizer_path: str = ""
-
-
-DATASET_C4 = DatasetConfig(
-    name="allenai/c4",
-    subset="en",
-    split="train",
-    tokenizer_path="./tokenizers/c4-128k",
-)
 
 
 @dataclass

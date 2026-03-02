@@ -1,0 +1,4 @@
+layers: 16
+embedding_dim: 768
+block_size: 2048
+hidden_dim: 2048
