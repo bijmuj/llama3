@@ -140,24 +140,22 @@ class FeedForward(nn.Module):
         return self.W2(F.silu(self.W(x)) * self.V(x))
 
 
+def norm(x, eps):
+    return F.rms_norm(x, (x.size(-1),), eps=eps)
+
+
 class Block(nn.Module):
     def __init__(self, config: ModelConfig):
         super().__init__()
         self.config = config
 
-        self.attn_norm = nn.RMSNorm(
-            self.config.embedding_dim, self.config.norm_eps
-        )
         self.attn = GQA(config)
 
-        self.ffn_norm = nn.RMSNorm(
-            self.config.embedding_dim, self.config.norm_eps
-        )
         self.ffn = FeedForward(config)
 
     def forward(self, x: torch.Tensor):
-        x = x + self.attn(self.attn_norm(x))
-        return x + self.ffn(self.ffn_norm(x))
+        x = x + self.attn(norm(x, self.config.norm_eps))
+        return x + self.ffn(norm(x, self.config.norm_eps))
 
 
 class Transformer(nn.Module):
@@ -170,7 +168,7 @@ class Transformer(nn.Module):
         self.layers = nn.ModuleList()
         for _ in range(self.config.layers):
             self.layers.append(Block(self.config))
-        self.norm = nn.RMSNorm(self.config.embedding_dim, self.config.norm_eps)
+
         self.lm_head = nn.Linear(
             self.config.embedding_dim, self.config.vocab_size
         )
@@ -179,5 +177,5 @@ class Transformer(nn.Module):
         x = self.embedding(tokens)
         for layer in self.layers:
             x = layer(x)
-        x = self.lm_head(self.norm(x))
+        x = self.lm_head(norm(x, self.config.norm_eps))
         return x
