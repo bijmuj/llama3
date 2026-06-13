@@ -1,13 +1,16 @@
 import os
 from glob import glob
+from itertools import islice
 
 import torch
+from normuon import SingleDeviceNorMuonWithAuxAdam
 from torch.nn.functional import cross_entropy
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import (
-    ChainedScheduler,
+    ConstantLR,
     CosineAnnealingLR,
     LinearLR,
+    SequentialLR,
 )
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -35,7 +38,10 @@ class Trainer:
         self.model = (
             Transformer(model_config).to(self.config.device).to(torch.bfloat16)
         )
-
+        print(
+            "model param count: ",
+            sum(p.numel() for p in self.model.parameters()),
+        )
         self.tokenizer = AutoTokenizer.from_pretrained(
             dataset_config.tokenizer_path
         )
@@ -47,85 +53,94 @@ class Trainer:
             streaming=True,
             token=READ_ONLY_TOKEN,
         )
-        self.dataset = PackedStreamingDataset(
-            self.base_dataset, self.tokenizer, self.model_config.block_size
-        )
 
         self.optimizer = self.configure_optimizer()
-        self.lr_scheduler = ChainedScheduler(
-            [
-                LinearLR(
-                    self.optimizer,
-                    start_factor=self.config.min_lr_ratio,
-                    end_factor=1.0,
-                    total_iters=self.config.warmup_iters,
-                ),
-                CosineAnnealingLR(
-                    self.optimizer,
-                    T_max=self.config.n_iter - self.config.warmup_iters,
-                    eta_min=self.config.learning_rate
-                    * self.config.min_lr_ratio,
-                ),
-            ]
+
+        linear_warmup = LinearLR(
+            self.optimizer,
+            start_factor=self.config.min_lr_ratio,
+            end_factor=1.0,
+            total_iters=self.config.warmup_iters,
+        )
+        constant_schedule = ConstantLR(
+            self.optimizer,
+            factor=1.0,
+            total_iters=self.config.constant_iters,
+        )
+        cosine_anneal = CosineAnnealingLR(
+            self.optimizer,
+            T_max=self.config.n_iter
+            - self.config.warmup_iters
+            - self.config.constant_iters,
+        )
+        self.lr_scheduler = SequentialLR(
+            self.optimizer,
+            schedulers=[
+                linear_warmup,
+                constant_schedule,
+                cosine_anneal,
+            ],
+            milestones=[
+                self.config.warmup_iters,
+                self.config.warmup_iters + self.config.constant_iters,
+            ],
         )
 
     def configure_optimizer(self):
-        decay = set()
-        no_decay = set()
-        whitelist_weight_modules = (torch.nn.Linear,)
-        blacklist_weight_modules = (torch.nn.RMSNorm, torch.nn.Embedding)
-
-        for mn, m in self.model.named_modules():
-            for pn, p in m.named_parameters():
-                fpn = "%s.%s" % (mn, pn) if mn else pn  # full param name
-                # random note: because named_modules and named_parameters are recursive
-                # we will see the same tensors p many many times. but doing it this way
-                # allows us to know which parent module any tensor p belongs to...
-                if pn.endswith("bias"):
-                    # all biases will not be decayed
-                    no_decay.add(fpn)
-                elif pn.endswith("weight") and isinstance(
-                    m, blacklist_weight_modules
-                ):
-                    # weights of blacklist modules will NOT be weight decayed
-                    no_decay.add(fpn)
-                elif pn.endswith("weight") and isinstance(
-                    m, whitelist_weight_modules
-                ):
-                    # weights of whitelist modules will be weight decayed
-                    decay.add(fpn)
-
-        # validate that we considered every parameter
-        param_dict = {pn: p for pn, p in self.model.named_parameters()}
-        inter_params = decay & no_decay
-        union_params = decay | no_decay
-        assert (
-            len(inter_params) == 0
-        ), "parameters %s made it into both decay/no_decay sets!" % (
-            str(inter_params),
-        )
-        assert len(param_dict.keys() - union_params) == 0, (
-            "parameters %s were not separated into either decay/no_decay set!"
-            % (str(param_dict.keys() - union_params),)
-        )
+        hidden_weights = [
+            p for p in self.model.layers.parameters() if p.ndim >= 2
+        ]
+        hidden_biases = [
+            p for p in self.model.layers.parameters() if p.ndim < 2
+        ]
+        embeddings = [p for p in self.model.embedding.parameters()]
+        lm_head_weights = [
+            p for p in self.model.lm_head.parameters() if p.ndim >= 2
+        ]
+        lm_head_biases = [
+            p for p in self.model.lm_head.parameters() if p.ndim < 2
+        ]
 
         # create the pytorch optimizer object
         optim_groups = [
+            # hidden weights : NorMuon + decay
             {
-                "params": [param_dict[pn] for pn in sorted(list(decay))],
-                "weight_decay": 0.1,
+                "params": hidden_weights,
+                "weight_decay": 0.01,
+                "lr": self.config.weight_lr,
+                "momentum": 0.95,
+                "beta2": 0.95,
+                "use_muon": True,
             },
+            # lm head weights : AdamW + decay
             {
-                "params": [param_dict[pn] for pn in sorted(list(no_decay))],
-                "weight_decay": 0.0,
+                "params": lm_head_weights,
+                "weight_decay": 0.01,
+                "lr": self.config.lm_head_lr,
+                "betas": (0.9, 0.95),
+                "eps": 1e-5,
+                "use_muon": False,
+            },
+            # embedding : AdamW
+            {
+                "params": embeddings,
+                "weight_decay": 0,
+                "lr": self.config.embedding_lr,
+                "betas": (0.9, 0.95),
+                "eps": 1e-5,
+                "use_muon": False,
+            },
+            # biases : AdamW
+            {
+                "params": [*hidden_biases, *lm_head_biases],
+                "weight_decay": 0,
+                "lr": self.config.bias_lr,
+                "betas": (0.9, 0.95),
+                "eps": 1e-5,
+                "use_muon": False,
             },
         ]
-        optimizer = AdamW(
-            optim_groups,
-            lr=self.config.learning_rate,
-            betas=(0.9, 0.95),
-            eps=1e-5,
-        )
+        optimizer = SingleDeviceNorMuonWithAuxAdam(optim_groups)
         return optimizer
 
     def load_most_recent(self):
@@ -136,6 +151,7 @@ class Trainer:
             ckpt = torch.load(latest_file, weights_only=False)
 
             self.start_iter = ckpt["start_iter"]
+            self.base_dataset = self.base_dataset.skip(self.start_iter)
             self.optimizer.load_state_dict(ckpt["optimizer"])
             self.model.load_state_dict(ckpt["model"])
             self.lr_scheduler.load_state_dict(ckpt["scheduler"])
@@ -146,8 +162,12 @@ class Trainer:
         os.makedirs(self.config.ckpt_path, exist_ok=True)
         self.model.train()
 
+        dataset = PackedStreamingDataset(
+            self.base_dataset, self.tokenizer, self.model_config.block_size
+        )
+
         dataloader = DataLoader(
-            self.dataset,
+            dataset,
             batch_size=self.config.batch_size,
             shuffle=False,
             num_workers=self.config.num_workers,
@@ -155,7 +175,7 @@ class Trainer:
         )
         data_iter = iter(dataloader)
         old_files = glob(f"{self.config.ckpt_path}/*.pt")
-
+        losses = []
         for n_iters in tqdm(range(self.start_iter, self.config.n_iter)):
             try:
                 batch = next(data_iter)
@@ -175,11 +195,9 @@ class Trainer:
             if torch.isnan(loss).any():
                 raise f"Encountered NaN on iter {n_iters+1}"
 
-            if wandb_run is not None:
-                wandb_run.log({"loss": loss.item()})
-
             loss = loss.float() / self.config.accum_steps
             loss.backward()
+            losses.append(loss.detach())
 
             if (n_iters + 1) % self.config.accum_steps == 0:
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
@@ -205,6 +223,10 @@ class Trainer:
                     },
                     file_path,
                 )
+                if wandb_run is not None:
+                    for l in losses:
+                        wandb_run.log({"loss": l.item()})
+                losses = []
 
                 old_files.append(file_path)
                 while len(old_files) > self.config.keep_last:

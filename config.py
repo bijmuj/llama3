@@ -28,10 +28,14 @@ class DatasetConfig:
 class TrainerConfig:
     batch_size: int = 1
     num_workers: int = 6
-    n_iter: int = 2_000_000
-    learning_rate: float = 3e-4
+    weight_lr: float = 2e-2
+    lm_head_lr: float = 4e-3
+    embedding_lr: float = 0.2
+    bias_lr: float = 4e-3
     min_lr_ratio: float = 0.1
-    warmup_iters: int = 2000
+    n_iter: int = 2e5
+    warmup_iters: int = 2e4
+    constant_iters: int = 1e5
     ckpt_path: str = ""
     save_every: int = 1000
     keep_last: int = 3
