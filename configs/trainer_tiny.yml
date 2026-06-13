@@ -1,0 +1,4 @@
+batch_size: 4
+ckpt_path: "./checkpoints/llama3-tiny"
+save_every: 1000
+n_iter: 200000
