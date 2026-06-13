@@ -1,0 +1,7 @@
+layers: 12
+embedding_dim: 768
+query_heads: 12
+key_value_heads: 12
+block_size: 2048
+hidden_dim: 2048
+vocab_size: 50432
