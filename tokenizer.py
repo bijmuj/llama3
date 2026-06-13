@@ -1,13 +1,13 @@
 import argparse
 
-from datasets import load_dataset
-from tokenizers import Tokenizer
 from tokenizers.models import BPE
 from tokenizers.pre_tokenizers import Sequence, UnicodeScripts, Whitespace
 from tokenizers.trainers import BpeTrainer
 from transformers import PreTrainedTokenizerFast
 
+from datasets import load_dataset
 from hf_tokens import READ_ONLY_TOKEN
+from tokenizers import Tokenizer
 
 LLAMA_3_SPECIAL_TOKENS = [
     "<|begin_of_text|>",
@@ -32,10 +32,10 @@ def parse_args():
     parser.add_argument("--dataset_name", type=str, default="allenai/c4")
     parser.add_argument("--subset", type=str, default="en")
     parser.add_argument("--split", type=str, default="train")
-    parser.add_argument(
-        "--out_dir", type=str, default="checkpoints/llama3-c4-128k"
-    )
+    parser.add_argument("--out_dir", type=str, default="tokenizers/c4-128k")
     parser.add_argument("--vocab_size", type=int, default=128000)
+    parser.add_argument("--max_samples", type=int, default=5_000_000)
+    parser.add_argument("--batch_size", type=int, default=1000)
     return parser.parse_args()
 
 
@@ -47,9 +47,6 @@ def batch_iterator(
 
     for example in dataset:
         text = example["text"]
-
-        if len(text) < 200:  # optional filtering
-            continue
 
         batch.append(text)
         count += 1
@@ -81,7 +78,13 @@ def train_tokenizer(args):
         special_tokens=[*LLAMA_3_SPECIAL_TOKENS, UNKNOWN_TOKEN, PAD_TOKEN],
     )
 
-    tokenizer.train_from_iterator(batch_iterator(dataset), trainer)
+    tokenizer.train_from_iterator(
+        batch_iterator(
+            dataset, batch_size=args.batch_size, max_samples=args.max_samples
+        ),
+        trainer,
+        length=args.max_samples,
+    )
 
     PreTrainedTokenizerFast(
         tokenizer_object=tokenizer,
