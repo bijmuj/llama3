@@ -1,0 +1,4 @@
+name: "mlfoundations/dclm-baseline-1.0"
+subset: ""
+split: "train"
+tokenizer_path: "./tokenizers/dclm-baseline-50k"
