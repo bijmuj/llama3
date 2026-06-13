@@ -8,6 +8,7 @@ dependencies = [
     "black>=26.1.0",
     "flash-attn>=2.8.3",
     "ninja>=1.13.0",
+    "normuon",
     "numpy>=2.4.2",
     "packaging>=26.0",
     "psutils>=3.3.14",
@@ -22,3 +23,6 @@ include = '\.pyi?$'
 [tool.isort]
 profile = "black"
 line_length = 80
+
+[tool.uv.sources]
+normuon = { git = "https://github.com/zichongli5/NorMuon.git" }
