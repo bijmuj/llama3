@@ -40,7 +40,7 @@ def main(args):
 
     wandb_dict = dict(
         entity="bijin",
-        project="llama3",
+        project="llms",
         config=dict(
             model_config=model_config_dict,
             trainer_config=trainer_config_dict,

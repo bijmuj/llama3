@@ -19,7 +19,6 @@ from transformers import AutoTokenizer
 from config import DatasetConfig, ModelConfig, TrainerConfig
 from dataset import PackedStreamingDataset
 from datasets import load_dataset
-from hf_tokens import READ_ONLY_TOKEN
 from model import Transformer
 
 
@@ -51,7 +50,6 @@ class Trainer:
             dataset_config.subset,
             split=dataset_config.split,
             streaming=True,
-            token=READ_ONLY_TOKEN,
         )
 
         self.optimizer = self.configure_optimizer()

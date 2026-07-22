@@ -1,20 +1,25 @@
 [project]
-name = "llamav3"
+name = "llms"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "black>=26.1.0",
+    "datasets>=5.0.0",
     "flash-attn>=2.8.3",
     "ninja>=1.13.0",
     "normuon",
     "numpy>=2.4.2",
     "packaging>=26.0",
     "psutils>=3.3.14",
+    "tokenizers>=0.22.2",
     "torch==2.8.0",
     "torchaudio==2.8.0",
     "torchvision==0.23.0",
+    "transformers>=5.14.1",
+    "wandb>=0.28.1",
+    "zstandard>=0.25.0",
 ]
 [tool.black]
 line-length=80

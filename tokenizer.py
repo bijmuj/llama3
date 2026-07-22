@@ -6,7 +6,6 @@ from tokenizers.trainers import BpeTrainer
 from transformers import PreTrainedTokenizerFast
 
 from datasets import load_dataset
-from hf_tokens import READ_ONLY_TOKEN
 from tokenizers import Tokenizer
 
 LLAMA_3_SPECIAL_TOKENS = [
@@ -71,7 +70,6 @@ def train_tokenizer(args):
         args.subset,
         split=args.split,
         streaming=True,
-        token=READ_ONLY_TOKEN,
     )
     trainer = BpeTrainer(
         vocab_size=args.vocab_size,
